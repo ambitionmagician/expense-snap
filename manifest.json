@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "Expense Snap — Receipt Logger",
+  "short_name": "Expense Snap",
+  "description": "Private offline expense logging, receipt photos and monthly CSV exports.",
+  "lang": "en",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eff4f1",
+  "theme_color": "#164e45",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23164e45'/%3E%3Cpath d='M18 12h28v40l-5-3-5 3-4-3-5 3-4-3-5 3z' fill='white'/%3E%3Cpath d='M24 23h16m-16 8h16m-16 8h9' stroke='%23164e45' stroke-width='3'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23164e45'/%3E%3Cpath d='M18 12h28v40l-5-3-5 3-4-3-5 3-4-3-5 3z' fill='white'/%3E%3Cpath d='M24 23h16m-16 8h16m-16 8h9' stroke='%23164e45' stroke-width='3'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

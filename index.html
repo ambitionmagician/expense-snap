@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#164e45">
+<meta name="description" content="A private, offline receipt logger with monthly summaries and CSV export.">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23164e45'/%3E%3Cpath d='M18 12h28v40l-5-3-5 3-4-3-5 3-4-3-5 3z' fill='white'/%3E%3Cpath d='M24 23h16m-16 8h16m-16 8h9' stroke='%23164e45' stroke-width='3'/%3E%3C/svg%3E">
+<title>Expense Snap — receipt logger with CSV export</title>
+<style>
+*{box-sizing:border-box}
+:root{font:16px/1.45 system-ui,sans-serif;color:#152e2a;background:#eff4f1;accent-color:#17604f}
+body{margin:0}
+header{background:#164e45;color:white;padding:1.4rem max(1rem,calc((100vw - 60rem)/2))}
+header p{margin:.25rem 0 0;color:#d4eee5}
+h1,h2,h3,p{margin-top:0}
+h1{font-size:1.65rem;margin-bottom:0}
+h2{font-size:1.25rem;margin-bottom:.8rem}
+h3{font-size:1rem}
+main{max-width:62rem;margin:auto;padding:1rem;display:grid;gap:1rem;align-items:start}
+section{min-width:0;background:white;padding:1rem;border-radius:1rem;box-shadow:0 2px 12px #193e3010}
+label{display:grid;gap:.25rem;font-size:.88rem;font-weight:650;min-width:0}
+input,select,button{font:inherit;max-width:100%;min-width:0;border:1px solid #9aaba3;border-radius:.55rem;padding:.62rem;background:white;color:inherit;min-height:44px}
+input,select{width:100%;font-size:1rem}
+button{cursor:pointer;font-weight:650}
+button.primary{background:#17604f;color:white;border-color:#17604f}
+button.danger{color:#932f28}
+button:disabled{opacity:.55;cursor:not-allowed}
+:focus-visible{outline:3px solid #da9200;outline-offset:2px}
+fieldset{padding:0;margin:0;border:0;min-width:0;display:grid;gap:.85rem}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.actions{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}
+.actions label{flex:1 1 10rem}
+small,.muted{color:#526760}
+#total{font-size:1.65rem;font-weight:750;margin:1rem 0 .25rem}
+canvas{width:100%;display:block}
+ul{padding:0;list-style:none}
+#breakdown li,.entryhead{display:flex;justify-content:space-between;gap:.5rem}
+#breakdown{font-size:.92rem}
+#entries{margin:0}
+#entries li{border-top:1px solid #d7e1dc;padding:.85rem 0;overflow-wrap:anywhere}
+.note{white-space:pre-wrap;margin:.3rem 0}
+details{margin:.4rem 0}
+summary{cursor:pointer;padding:.4rem 0}
+img{display:block;max-width:100%;max-height:28rem;border-radius:.5rem}
+#status{min-height:1.45em;margin:.75rem 0 0;font-weight:600}
+#status.error{color:#932f28}
+[hidden]{display:none!important}
+@media(min-width:48rem){main{grid-template-columns:minmax(17rem,2fr) minmax(0,3fr)}}
+</style>
+</head>
+<body>
+<header><h1>Expense Snap</h1><p>Receipt log · USD · <span id="offline">On this device</span></p></header>
+<main>
+<section>
+<h2 id="formTitle">Quick expense</h2>
+<form id="form">
+<fieldset id="fields" disabled>
+<div class="pair">
+<label>Amount ($)<input id="amount" type="text" inputmode="decimal" placeholder="0.00" maxlength="14" autocomplete="off" required></label>
+<label>Category<select id="category"></select></label>
+</div>
+<label>Note (optional)<input id="note" maxlength="500" placeholder="What was it for?"></label>
+<label>Date<input id="date" type="date" min="0001-01-01" max="9999-12-31" required></label>
+<label>Receipt (optional)<input id="photo" type="file" accept="image/*" capture="environment"></label>
+<small id="photoHelp">Photos are resized before saving.</small>
+<button id="removePhoto" type="button" hidden>Remove attached receipt</button>
+<div class="actions"><button class="primary" id="save" type="submit">Save expense</button><button type="button" id="cancel" hidden>Cancel edit</button></div>
+</fieldset>
+</form>
+<p id="status" role="status" aria-live="polite"></p>
+<small>Stored in this browser only. Clearing site data removes entries and photos. CSV exports include text, not photos.</small>
+</section>
+<section>
+<h2>Monthly ledger</h2>
+<div class="actions"><label>Month<input id="month" type="month" required pattern="[0-9]{4}-(0[1-9]|1[0-2])" placeholder="YYYY-MM"></label>
+<button id="exportBtn" disabled>Export CSV</button></div>
+<p id="total">—</p>
+<canvas id="chart" aria-hidden="true"></canvas>
+<ul id="breakdown" aria-label="Totals by category"></ul>
+<h3 id="count">Expenses</h3><ul id="entries"></ul>
+</section>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const categories=['Food','Groceries','Transport','Shopping','Home','Health','Travel','Other'];
+const colors=['#17604f','#cb7846','#466fb1','#944f82','#92833a','#3f8995','#7655ac','#687671'];
+const catColor=new Map(categories.map((c,i)=>[c,colors[i]]));
+const money=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
+const fmt=cents=>money.format(cents/100);
+function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+for(const cat of categories)$('category').add(new Option(cat,cat));
+$('date').value=today();$('month').value=today().slice(0,7);
+let db,editing=null,keepPhoto=null,photoHelpSnapshot=null,busy=false,rows=[],version=0,urls=[],bars=[];
+function say(msg,error=false){$('status').textContent=msg;$('status').classList.toggle('error',error)}
+function openDB(){return new Promise((resolve,reject)=>{
+ const req=indexedDB.open('expense-snap',1);
+ req.onupgradeneeded=e=>{const os=e.target.result.createObjectStore('expenses',{keyPath:'id',autoIncrement:true});os.createIndex('date','date')};
+ req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+ req.onblocked=()=>say('Close other Expense Snap tabs, then reload.',true);
+})}
+function storeOp(mode,op){return new Promise((resolve,reject)=>{
+ const tx=db.transaction('expenses',mode);
+ tx.onerror=()=>reject(tx.error||new Error('Storage error'));
+ tx.onabort=()=>reject(tx.error||new Error('Storage operation interrupted.'));
+ let req;
+ try{req=op(tx.objectStore('expenses'))}catch(err){reject(err);return}
+ tx.oncomplete=()=>resolve(req.result);
+})}
+function validMonth(m){return /^\d{4}-(0[1-9]|1[0-2])$/.test(m)}
+function lastDayOfMonth(m){const [y,mo]=m.split('-').map(Number);return new Date(y,mo,0).getDate();}
+function lock(on){busy=on;$('fields').disabled=on;$('month').disabled=on;for(const b of $('entries').querySelectorAll('button'))b.disabled=on}
+function resetForm(){
+ editing=null;keepPhoto=null;photoHelpSnapshot=null;$('form').reset();$('date').value=today();$('formTitle').textContent='Quick expense';
+ $('save').textContent='Save expense';$('cancel').hidden=true;$('removePhoto').hidden=true;$('photoHelp').textContent='Photos are resized before saving.';
+}
+$('cancel').onclick=()=>{const restore=photoHelpSnapshot;resetForm();if(restore!==null)$('photoHelp').textContent=restore;say('Edit cancelled.')};
+$('removePhoto').onclick=()=>{keepPhoto=null;$('photo').value='';$('removePhoto').hidden=true;$('photoHelp').textContent='Receipt will be removed when you save.'};
+async function downscale(file){
+ const url=URL.createObjectURL(file);
+ try{
+  const img=new Image();img.src=url;await img.decode();
+  const ratio=Math.min(1,1400/Math.max(img.naturalWidth,img.naturalHeight));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*ratio));c.height=Math.max(1,Math.round(img.naturalHeight*ratio));
+  const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height);
+  return await new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(new Error('Could not encode receipt image.')),'image/jpeg',.8));
+ }catch{throw new Error('Could not read the receipt. Try a smaller JPEG or PNG photo.')}
+ finally{URL.revokeObjectURL(url)}
+}
+$('form').onsubmit=async e=>{
+ e.preventDefault();if(busy||!db)return;
+ const raw=$('amount').value.trim().replace(/,/g,'.');
+ if(!/^(?:\d{1,9}(?:\.\d{0,2})?|\.\d{1,2})$/.test(raw)||Number(raw)<=0){say('Enter a positive amount with at most two decimal places (up to 999,999,999.99).',true);$('amount').focus();return}
+ const cents=Math.round(Number(raw)*100);
+ if(!Number.isSafeInteger(cents)){say('Amount is too large to store safely.',true);$('amount').focus();return}
+ const date=$('date').value;
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){say('Choose a valid date.',true);return}
+ const category=$('category').value,note=$('note').value.trim();
+ let photo=keepPhoto;
+ lock(true);say('Saving…');
+ try{
+  const file=$('photo').files[0];if(file)photo=await downscale(file);
+  const item={cents,category,note,date,photo};
+  if(editing!==null)item.id=editing;
+  await storeOp('readwrite',s=>s.put(item));resetForm();$('category').value=category;$('month').value=date.slice(0,7);
+  say('Expense saved.');await refresh();
+ }catch(err){say('Not saved. '+(err.message||'Check available device storage.'),true)}
+ finally{lock(false)}
+};
+function edit(item){
+ if(busy)return;
+ if(editing!==null&&editing!==item.id&&!confirm('Discard the current edit?'))return;
+ editing=item.id;keepPhoto=item.photo;photoHelpSnapshot=item.photo?'Receipt attached. Choose a new photo to replace it.':'Photos are resized before saving.';$('amount').value=(item.cents/100).toFixed(2);$('category').value=item.category;$('note').value=item.note;$('date').value=item.date;$('photo').value='';
+ $('photoHelp').textContent=photoHelpSnapshot;
+ $('removePhoto').hidden=!item.photo;$('cancel').hidden=false;$('formTitle').textContent='Edit expense';$('save').textContent='Save changes';say('');$('amount').focus();$('formTitle').scrollIntoView({block:'start'});
+}
+async function remove(item){
+ if(busy||!confirm(`Delete ${fmt(item.cents)} for ${item.category} on ${item.date}?`))return;
+ lock(true);
+ try{await storeOp('readwrite',s=>s.delete(item.id));if(editing===item.id)resetForm();say('Expense deleted.');await refresh()}
+ catch(err){say('Delete failed: '+err.message,true)}finally{lock(false)}
+}
+function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
+function draw(){
+ const canvas=$('chart');canvas.hidden=!bars.length;if(!bars.length)return;
+ const w=canvas.clientWidth,h=26*bars.length,dpr=window.devicePixelRatio||1;
+ canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);canvas.style.height=h+'px';
+ const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);ctx.scale(dpr,dpr);ctx.font='13px system-ui';ctx.textBaseline='middle';
+ const max=Math.max(1,bars[0][1]);
+ bars.forEach(([cat,sum],i)=>{ctx.fillStyle='#283d35';ctx.fillText(cat,0,i*26+13);ctx.fillStyle=catColor.get(cat)||'#687671';ctx.fillRect(80,i*26+5,Math.max(2,(w-110)*sum/max),16);ctx.fillStyle='#283d35';ctx.fillText(fmt(sum),Math.max(84,(w-110)*sum/max+84),i*26+13)});
+}
+function render(){
+ for(const u of urls)URL.revokeObjectURL(u);urls=[];
+ const sums=new Map();let total=0;
+ $('entries').replaceChildren();$('breakdown').replaceChildren();
+ for(const r of rows){
+  total+=r.cents;sums.set(r.category,(sums.get(r.category)||0)+r.cents);
+  const li=el('li'),head=el('div',undefined,'entryhead');head.append(el('strong',r.category),el('strong',fmt(r.cents)));li.append(head,el('small',r.date));
+  if(r.note)li.append(el('p',r.note,'note'));
+  if(r.photo){
+   const d=el('details');d.append(el('summary','View receipt'));
+   d.ontoggle=()=>{if(d.open&&d.isConnected&&!d.querySelector('img')){const u=URL.createObjectURL(r.photo);urls.push(u);const img=el('img');img.src=u;img.alt='Receipt for '+r.category+' on '+r.date;img.loading='lazy';d.append(img)}};
+   li.append(d);
+  }
+  const actions=el('div',undefined,'actions'),a=el('button','Edit'),b=el('button','Delete','danger');a.onclick=()=>edit(r);b.onclick=()=>remove(r);a.disabled=b.disabled=busy;actions.append(a,b);li.append(actions);$('entries').append(li);
+ }
+ bars=[...sums].sort((a,b)=>b[1]-a[1]);draw();
+ for(const [cat,sum] of bars){const li=el('li');li.append(el('span',cat),el('strong',fmt(sum)));$('breakdown').append(li)}
+ $('count').textContent=rows.length?`${rows.length} expense${rows.length===1?'':'s'}`:'No expenses this month';
+ $('total').textContent=rows.length?fmt(total):'—';$('exportBtn').disabled=!rows.length;
+}
+async function refresh(){
+ const token=++version,m=$('month').value;rows=[];render();
+ if(!db||!validMonth(m))return;
+ try{
+  const last=String(lastDayOfMonth(m)).padStart(2,'0');
+  const result=await storeOp('readonly',s=>s.index('date').getAll(IDBKeyRange.bound(m+'-01',m+'-'+last)));
+  if(token!==version)return;rows=result.sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);render();
+ }catch(err){if(token===version)say('Cannot read this month: '+err.message,true)}
+}
+$('month').oninput=refresh;
+window.addEventListener('resize',draw);
+$('exportBtn').onclick=()=>{
+ if(!rows.length)return;
+ function cell(s){s=String(s);if(/^\s*[=+\-@]|^[\t\r\n]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'}
+ const lines=[['Date','Amount (USD)','Category','Note','Receipt attached'],...rows.slice().reverse().map(r=>[r.date,(r.cents/100).toFixed(2),r.category,r.note,r.photo?'Yes':'No'])];
+ const blob=new Blob(['\uFEFF',lines.map(line=>line.map(cell).join(',')).join('\r\n'),'\r\n'],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download=`expense-snap-${$('month').value}.csv`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+};
+(async()=>{try{db=await openDB();db.onversionchange=()=>{db.close();location.reload()};$('fields').disabled=false;await refresh()}catch(err){say('Device storage unavailable. Allow IndexedDB and reload. '+err.message,true)}})();
+if('serviceWorker' in navigator){
+ navigator.serviceWorker.register('./sw.js').then(()=>navigator.serviceWorker.ready).then(()=>{$('offline').textContent='Offline ready'}).catch(()=>{$('offline').textContent='Offline installation unavailable — use HTTPS or localhost'});
+}else $('offline').textContent='Use HTTPS or localhost to install';
+</script>
+</body>
+</html>
